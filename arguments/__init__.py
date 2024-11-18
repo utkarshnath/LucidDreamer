@@ -180,9 +180,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_scale = 1.0
         self.lambda_sat = 1.0
         self.lambda_radius = 1.0
-        self.densification_interval = 100
-        self.opacity_reset_interval = 300
-        self.densify_from_iter = 100
+        self.densification_interval = 25
+        self.opacity_reset_interval = 60
+        self.densify_from_iter = 25
         self.densify_until_iter = 30_00 
         
         self.use_control_net_iter = 10000000 

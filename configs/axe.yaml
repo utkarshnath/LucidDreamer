@@ -8,6 +8,8 @@ ModelParams:
   workspace: viking_axe
   sh_degree: 0
   bg_aug_ratio: 0.66
+  _source_path: /scratch/rgoel15/lucid/axe/
+  _model_path: /scratch/rgoel15/lucid/axe/
 
 GuidanceParams:
   model_key: 'stabilityai/stable-diffusion-2-1-base'
@@ -15,7 +17,7 @@ GuidanceParams:
   negative: 'unrealistic, blurry, low quality, out of focus, ugly, low contrast, dull, low-resolution, oversaturation.'
   inverse_text: ''
   perpneg: false
-  C_batch_size: 4
+  C_batch_size: 1
 
   t_range: [0.02, 0.5]
   max_t_range: 0.98
@@ -36,7 +38,7 @@ GuidanceParams:
   delta_t_start: 100
 
 GenerateCamParams:
-  init_shape: 'pointe'
+  init_shape: 'sphere'
   init_prompt: 'A flag.'  
   use_pointe_rgb: false
   init_num_pts: 100_000
@@ -64,7 +66,7 @@ OptimizationParams:
 
   as_latent_ratio : 0.2
   geo_iter : 0
-  densify_from_iter: 100
+  densify_from_iter: 0
   densify_until_iter: 3000
   percent_dense: 0.003
   densify_grad_threshold: 0.00075

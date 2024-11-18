@@ -53,6 +53,13 @@ class RSceneInfo(NamedTuple):
     test_cameras: list
     ply_path: str
 
+class GraphSceneInfo(NamedTuple):
+    point_cloud: BasicPointCloud
+    test_cameras: list
+    points_per_obj: list
+    num_objs: int
+    ply_path: str
+
 # def getNerfppNorm(cam_info):
 #     def get_center_and_diag(cam_centers):
 #         cam_centers = np.hstack(cam_centers)
@@ -78,13 +85,13 @@ class RSceneInfo(NamedTuple):
 
 
 
-def fetchPly(path):
+def fetchPly(path, num_objs):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
     normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
-    return BasicPointCloud(points=positions, colors=colors, normals=normals)
+    return BasicPointCloud(points=positions.reshape(num_objs, -1, 3), colors=colors.reshape(num_objs, -1, 3), normals=normals.reshape(num_objs, -1, 3))
 
 def storePly(path, xyz, rgb):
     # Define the dtype for the structured array
@@ -108,19 +115,30 @@ def readCircleCamInfo(path,opt):
     print("Reading Test Transforms")
     test_cam_infos = GenerateCircleCameras(opt,render45 = opt.render_45)
     ply_path = os.path.join(path, "init_points3d.ply")
-    if not os.path.exists(ply_path):
-        # Since this data set has no colmap data, we start with random points
-        num_pts = opt.init_num_pts       
+    lengths_path = os.path.join(path, "init_points3d_length.npy")
+    num_pts = opt.init_num_pts
+    num_objs = opt.num_objs
+
+    if not os.path.exists(ply_path) or not os.path.exists(lengths_path):
+        # Since this data set has no colmap data, we start with random points     
+        points = num_pts // num_objs
         if opt.init_shape == 'sphere':
-            thetas = np.random.rand(num_pts)*np.pi
-            phis = np.random.rand(num_pts)*2*np.pi        
-            radius = np.random.rand(num_pts)*0.5
-            # We create random points inside the bounds of sphere
-            xyz = np.stack([
-                radius * np.sin(thetas) * np.sin(phis),
-                radius * np.sin(thetas) * np.cos(phis),
-                radius * np.cos(thetas),
-            ], axis=-1) # [B, 3]
+            xyz = []
+            lengths = []
+            for i in range(num_objs):
+                thetas = np.random.rand(points)*np.pi
+                phis = np.random.rand(points)*2*np.pi        
+                radius = np.random.rand(points)*opt.radius_params[i]
+                # We create random points inside the bounds of sphere
+                obj_xyz = np.stack([
+                    radius * np.sin(thetas) * np.sin(phis),
+                    radius * np.sin(thetas) * np.cos(phis),
+                    radius * np.cos(thetas),
+                ], axis=-1) # [B, 3]
+                obj_xyz = obj_xyz + opt.center_params[i]
+                xyz.append(obj_xyz)
+                lengths.append(points)
+            xyz = np.array(xyz)
         elif opt.init_shape == 'box':
             xyz = np.random.random((num_pts, 3)) * 1.0 - 0.5
         elif opt.init_shape == 'rectangle_x':
@@ -134,24 +152,34 @@ def readCircleCamInfo(path,opt):
             xyz[:, 1] = xyz[:, 1] * 0.6 - 0.3
             xyz[:, 2] = xyz[:, 2] * 1.2 - 0.6
         elif opt.init_shape == 'pointe':
-            num_pts = int(num_pts/5000)
-            xyz,rgb = init_from_pointe(opt.init_prompt)
-            xyz[:,1] = - xyz[:,1]
-            xyz[:,2] = xyz[:,2] + 0.15
-            thetas = np.random.rand(num_pts)*np.pi
-            phis = np.random.rand(num_pts)*2*np.pi        
-            radius = np.random.rand(num_pts)*0.05
-            # We create random points inside the bounds of sphere
-            xyz_ball = np.stack([
-                radius * np.sin(thetas) * np.sin(phis),
-                radius * np.sin(thetas) * np.cos(phis),
-                radius * np.cos(thetas),
-            ], axis=-1) # [B, 3]expend_dims
-            rgb_ball = np.random.random((4096, num_pts, 3))*0.0001
-            rgb = (np.expand_dims(rgb,axis=1)+rgb_ball).reshape(-1,3)
-            xyz = (np.expand_dims(xyz,axis=1)+np.expand_dims(xyz_ball,axis=0)).reshape(-1,3)
-            xyz = xyz * 1.
-            num_pts = xyz.shape[0]
+            xyz = []
+            rgb = []
+            lengths = []
+            for i in range(num_objs):
+                num_pts = int(points/5000)
+                obj_xyz, obj_rgb = init_from_pointe(opt.init_prompt[i])
+                obj_xyz[:,1] = - obj_xyz[:,1]
+                obj_xyz[:,2] = obj_xyz[:,2] + 0.15
+                thetas = np.random.rand(num_pts) * np.pi
+                phis = np.random.rand(num_pts) * 2 * np.pi        
+                radius = np.random.rand(num_pts) * 0.05
+                # We create random points inside the bounds of sphere
+                obj_xyz_ball = np.stack([
+                    radius * np.sin(thetas) * np.sin(phis),
+                    radius * np.sin(thetas) * np.cos(phis),
+                    radius * np.cos(thetas),
+                ], axis=-1) # [B, 3]expend_dims
+                obj_rgb_ball = np.random.random((4096, num_pts, 3))*0.0001
+                obj_rgb = (np.expand_dims(obj_rgb, axis=1) + obj_rgb_ball).reshape(-1,3)
+                obj_xyz = (np.expand_dims(obj_xyz, axis=1) + np.expand_dims(obj_xyz_ball, axis=0)).reshape(-1, 3)
+                obj_xyz = obj_xyz * 1. + opt.center_params[i]
+                num_pts = obj_xyz.shape[0]
+                xyz.append(obj_xyz)
+                rgb.append(obj_rgb)
+                lengths.append(num_pts)
+            num_pts = num_objs * lengths[0]
+            xyz = np.array(xyz)
+            rgb = np.array(xyz)
         elif opt.init_shape == 'scene':
             thetas = np.random.rand(num_pts)*np.pi
             phis = np.random.rand(num_pts)*2*np.pi        
@@ -166,20 +194,26 @@ def readCircleCamInfo(path,opt):
             raise NotImplementedError()
         print(f"Generating random point cloud ({num_pts})...")
 
-        shs = np.random.random((num_pts, 3)) / 255.0
+        shs = np.random.random((num_objs, num_pts // num_objs, 3)) / 255.0
 
         if opt.init_shape == 'pointe' and opt.use_pointe_rgb:
-            pcd = BasicPointCloud(points=xyz, colors=rgb, normals=np.zeros((num_pts, 3)))
+            pcd = BasicPointCloud(points=xyz, colors=rgb, normals=np.zeros((num_objs, num_pts // num_objs, 3)))
             storePly(ply_path, xyz, rgb * 255)
+            np.save(lengths_path, np.array(lengths))
         else:
-            pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-            storePly(ply_path, xyz, SH2RGB(shs) * 255)
+            pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_objs, num_pts // num_objs, 3)))
+            storePly(ply_path, np.vstack(xyz), np.vstack(SH2RGB(shs) * 255))
+            np.save(lengths_path, np.array(lengths))
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, num_objs)
+        lengths = np.load(lengths_path).tolist()
     except:
         pcd = None
+        lengths = None
 
-    scene_info = RSceneInfo(point_cloud=pcd,
+    scene_info = GraphSceneInfo(point_cloud=pcd,
+                           points_per_obj=lengths,
+                           num_objs=num_objs,
                            test_cameras=test_cam_infos,
                            ply_path=ply_path)
     return scene_info

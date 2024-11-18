@@ -17,15 +17,25 @@ from utils.sh_utils import eval_sh, SH2RGB
 from utils.graphics_utils import fov2focal
 import random
 
+def zero_pad_tensor(tensor_list, pad_size, num_objs):
+    x = list(tensor_list[0].shape)
+    x[0] = pad_size
+    for i in range(num_objs):
+        xyz_pad = torch.zeros((x), device=tensor_list[i].device, dtype=tensor_list[i].dtype)
+        xyz_pad[:tensor_list[i].shape[0]] = tensor_list[i]
+        tensor_list[i] = xyz_pad.unsqueeze(0)
+    
+    return torch.cat(tensor_list, dim=0)
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, black_video = False,
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, objs: list, scaling_modifier = 1.0, black_video = False,
            override_color = None, sh_deg_aug_ratio = 0.1, bg_aug_ratio = 0.3, shs_aug_ratio=1.0, scale_aug_ratio=1.0, test = False):
     """
     Render the scene. 
     
     Background tensor (bg_color) must be on GPU!
     """
- 
+    # for i in range(4):
+    #     print(pc.get_xyz[i].isnan().sum())
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -82,12 +92,20 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             debug=False
         )
 
-
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    means3D = pc.get_xyz
-    means2D = screenspace_points
-    opacity = pc.get_opacity
+    means3D = []
+    means2D = []
+    opacity = []
+
+    for i in objs:
+        means3D.append(pc.get_xyz[i][:pc.points_per_obj[i]])
+        means2D.append(screenspace_points[i][:pc.points_per_obj[i]])
+        opacity.append(pc.get_opacity[i][:pc.points_per_obj[i]])
+
+    means3D = torch.cat(means3D, dim=0)
+    means2D = torch.cat(means2D, dim=0)
+    opacity = torch.cat(opacity, dim=0)
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -97,8 +115,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
-        scales = pc.get_scaling
-        rotations = pc.get_rotation
+        scales = []
+        rotations = []
+        for i in objs:
+            scales.append(pc.get_scaling[i][:pc.points_per_obj[i]].reshape(-1, 3))
+            rotations.append(pc.get_rotation[i][:pc.points_per_obj[i]].reshape(-1, 4))
+        scales = torch.cat(scales, dim=0)
+        rotations = torch.cat(rotations, dim=0)
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -106,11 +129,16 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     colors_precomp = None
     if colors_precomp is None:
         if pipe.convert_SHs_python:
-            raw_rgb = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2).squeeze()[:,:3]
-            rgb = torch.sigmoid(raw_rgb)
-            colors_precomp = rgb
+            rgb = []
+            for i in objs:
+                raw_rgb = pc.get_features[i][:pc.points_per_obj[i]].transpose(2,3).reshape(-1, (pc.max_sh_degree + 1) ** 2, 3).view(-1, 3, (pc.max_sh_degree+1)**2).squeeze()[:,:3]
+                rgb.append(torch.sigmoid(raw_rgb))
+            colors_precomp = torch.cat(rgb, dim=0)
         else:
-            shs = pc.get_features
+            shs = []
+            for i in objs:
+                shs.append(pc.get_features[i][:pc.points_per_obj[i]].reshape(-1, (pc.max_sh_degree + 1) ** 2, 3))
+            shs = torch.cat(shs, dim=0)
     else:
         colors_precomp = override_color
 
@@ -124,7 +152,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         scales = torch.clamp(scales + (torch.randn_like(scales) * variance), 0.0)
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-
     rendered_image, radii, depth_alpha = rasterizer(
         means3D = means3D,
         means2D = means2D,
@@ -146,16 +173,35 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 #     # They will be excluded from value updates used in the splitting criteria.
 #     return {"render": rendered_image,
 #             "depth": norm_disparity,
+    
 
-    focal = 1 / (2 * math.tan(viewpoint_camera.FoVx / 2))  
+    focal = 1 / (2 * math.tan(viewpoint_camera.FoVx / 2)) 
     disp = focal / (depth + (alpha * 10) + 1e-5)
 
     try:
         min_d = disp[alpha <= 0.1].min()
-    except Exception:
+    except:
         min_d = disp.min()
 
     disp = torch.clamp((disp - min_d) / (disp.max() - min_d), 0.0, 1.0)
+
+    radiis = []
+    start = 0
+    l = 0
+    for i in range(pc.num_objs):
+        l = max(l, pc.points_per_obj[i])
+
+    for i in objs:
+        end = start + pc.points_per_obj[i]
+        radiis.append(radii[start: end])
+        start = end
+    
+    radii = zero_pad_tensor(radiis, l, len(objs))
+    visibility_filter = []
+    for i in range(len(objs)):
+        visibility_filter.append((radii[i] > 0).unsqueeze(0))
+    
+    visibility_filter = torch.cat(visibility_filter, dim=0)
     
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
@@ -163,6 +209,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "depth": disp,
             "alpha": alpha,
             "viewspace_points": screenspace_points,
-            "visibility_filter" : radii > 0,
+            "visibility_filter" : visibility_filter,
             "radii": radii,
             "scales": scales}

@@ -106,14 +106,14 @@ def get_pos_neg_text_embeddings(embeddings, azimuth_val, opt):
         weights = torch.tensor([1.0, side_neg_w, front_neg_w])
     return text_z, weights.to(text_z.device)
 
-def prepare_embeddings(guidance_opt, guidance):
+def prepare_embeddings(guidance_opt, text, guidance):
     embeddings = {}
     # text embeddings (stable-diffusion) and (IF)
-    embeddings['default'] = guidance.get_text_embeds([guidance_opt.text])
+    embeddings['default'] = guidance.get_text_embeds([text])
     embeddings['uncond'] = guidance.get_text_embeds([guidance_opt.negative])
 
     for d in ['front', 'side', 'back']:
-        embeddings[d] = guidance.get_text_embeds([f"{guidance_opt.text}, {d} view"])
+        embeddings[d] = guidance.get_text_embeds([f"{text}, {d} view"])
     embeddings['inverse_text'] = guidance.get_text_embeds(guidance_opt.inverse_text)
     return embeddings
 
@@ -132,9 +132,141 @@ def guidance_setup(guidance_opt):
     if guidance is not None:
         for p in guidance.parameters():
             p.requires_grad = False
-    embeddings = prepare_embeddings(guidance_opt, guidance)
-    return guidance, embeddings
+    obj_embeddings = []
+    edge_embeddings = []
+    embeddings = prepare_embeddings(guidance_opt, guidance_opt.text, guidance)
+    for text in guidance_opt.prompt_obj:
+        obj_embeddings.append(prepare_embeddings(guidance_opt, text, guidance))
+    for text in guidance_opt.prompt_edge:
+        edge_embeddings.append(prepare_embeddings(guidance_opt, text, guidance))
+    return guidance, embeddings, obj_embeddings, edge_embeddings
 
+def forward(opt, embeddings, objs, iteration, viewpoint_stack, scene, guidance_opt, debug_from, gaussians, pipe, background, dataset, guidance, use_control_net, save_folder, gcams):
+    # progressively relaxing view range    
+    if not opt.use_progressive:                
+        if iteration >= opt.progressive_view_iter and iteration % opt.scale_up_cameras_iter == 0:
+            scene.pose_args.fovy_range[0] = max(scene.pose_args.max_fovy_range[0], scene.pose_args.fovy_range[0] * opt.fovy_scale_up_factor[0])
+            scene.pose_args.fovy_range[1] = min(scene.pose_args.max_fovy_range[1], scene.pose_args.fovy_range[1] * opt.fovy_scale_up_factor[1])
+
+            scene.pose_args.radius_range[1] = max(scene.pose_args.max_radius_range[1], scene.pose_args.radius_range[1] * opt.scale_up_factor)
+            scene.pose_args.radius_range[0] = max(scene.pose_args.max_radius_range[0], scene.pose_args.radius_range[0] * opt.scale_up_factor)
+
+            scene.pose_args.theta_range[1] = min(scene.pose_args.max_theta_range[1], scene.pose_args.theta_range[1] * opt.phi_scale_up_factor)
+            scene.pose_args.theta_range[0] = max(scene.pose_args.max_theta_range[0], scene.pose_args.theta_range[0] * 1/opt.phi_scale_up_factor)
+
+            # opt.reset_resnet_iter = max(500, opt.reset_resnet_iter // 1.25)
+            scene.pose_args.phi_range[0] = max(scene.pose_args.max_phi_range[0] , scene.pose_args.phi_range[0] * opt.phi_scale_up_factor)
+            scene.pose_args.phi_range[1] = min(scene.pose_args.max_phi_range[1], scene.pose_args.phi_range[1] * opt.phi_scale_up_factor)
+            
+            print('scale up theta_range to:', scene.pose_args.theta_range)
+            print('scale up radius_range to:', scene.pose_args.radius_range)
+            print('scale up phi_range to:', scene.pose_args.phi_range)
+            print('scale up fovy_range to:', scene.pose_args.fovy_range)
+
+    # Pick a random Camera
+    if not viewpoint_stack:
+        viewpoint_stack = scene.getRandTrainCameras().copy()
+
+    C_batch_size = guidance_opt.C_batch_size
+    viewpoint_cams = []
+    images = []
+    text_z_ = []
+    weights_ = []
+    depths = []
+    alphas = []
+    scales = []
+
+    text_z_inverse = torch.cat([embeddings['uncond'],embeddings['inverse_text']], dim=0)
+
+    for i in range(C_batch_size):
+        try:
+            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))            
+        except:
+            viewpoint_stack = scene.getRandTrainCameras().copy()
+            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+            
+        #pred text_z
+        azimuth = viewpoint_cam.delta_azimuth
+        text_z = [embeddings['uncond']]
+
+
+        if guidance_opt.perpneg:
+            text_z_comp, weights = adjust_text_embeddings(embeddings, azimuth, guidance_opt)
+            text_z.append(text_z_comp)
+            weights_.append(weights)
+
+        else:                
+            if azimuth >= -90 and azimuth < 90:
+                if azimuth >= 0:
+                    r = 1 - azimuth / 90
+                else:
+                    r = 1 + azimuth / 90
+                start_z = embeddings['front']
+                end_z = embeddings['side']
+            else:
+                if azimuth >= 0:
+                    r = 1 - (azimuth - 90) / 90
+                else:
+                    r = 1 + (azimuth + 90) / 90
+                start_z = embeddings['side']
+                end_z = embeddings['back']
+            text_z.append(r * start_z + (1 - r) * end_z)
+
+        text_z = torch.cat(text_z, dim=0)
+        text_z_.append(text_z)
+
+        # Render
+        if (iteration - 1) == debug_from:
+            pipe.debug = True
+        
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, objs,
+                            sh_deg_aug_ratio = dataset.sh_deg_aug_ratio, 
+                            bg_aug_ratio = dataset.bg_aug_ratio, 
+                            shs_aug_ratio = dataset.shs_aug_ratio, 
+                            scale_aug_ratio = dataset.scale_aug_ratio)
+        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        depth, alpha = render_pkg["depth"], render_pkg["alpha"]
+
+        scales.append(render_pkg["scales"])
+        images.append(image)
+        depths.append(depth)
+        alphas.append(alpha)
+        viewpoint_cams.append(viewpoint_cams)
+
+    images = torch.stack(images, dim=0)
+    depths = torch.stack(depths, dim=0)
+    alphas = torch.stack(alphas, dim=0)
+
+    # Loss
+    warm_up_rate = 1. - min(iteration/opt.warmup_iter,1.)
+    guidance_scale = guidance_opt.guidance_scale
+    _aslatent = False
+    if iteration < opt.geo_iter or random.random()< opt.as_latent_ratio:
+        _aslatent=True
+    if iteration > opt.use_control_net_iter and (random.random() < guidance_opt.controlnet_ratio):
+            use_control_net = True
+    if guidance_opt.perpneg:
+        loss = guidance.train_step_perpneg(torch.stack(text_z_, dim=1), images, 
+                                            pred_depth=depths, pred_alpha=alphas,
+                                            grad_scale=guidance_opt.lambda_guidance,
+                                            use_control_net = use_control_net ,save_folder = save_folder,  iteration = iteration, warm_up_rate=warm_up_rate, 
+                                            weights = torch.stack(weights_, dim=1), resolution=(gcams.image_h, gcams.image_w),
+                                            guidance_opt=guidance_opt,as_latent=_aslatent, embedding_inverse = text_z_inverse)
+    else:
+        loss = guidance.train_step(torch.stack(text_z_, dim=1), images, 
+                                pred_depth=depths, pred_alpha=alphas,
+                                grad_scale=guidance_opt.lambda_guidance,
+                                use_control_net = use_control_net ,save_folder = save_folder,  iteration = iteration, warm_up_rate=warm_up_rate, 
+                                resolution=(gcams.image_h, gcams.image_w),
+                                guidance_opt=guidance_opt,as_latent=_aslatent, embedding_inverse = text_z_inverse)
+    scales = torch.stack(scales, dim=0)
+
+    loss_scale = torch.mean(scales,dim=-1).mean()
+    loss_tv = tv_loss(images) + tv_loss(depths) 
+    # loss_bin = torch.mean(torch.min(alphas - 0.0001, 1 - alphas))
+
+    loss = loss + opt.lambda_tv * loss_tv + opt.lambda_scale * loss_scale
+    return loss, image, viewspace_point_tensor, visibility_filter, radii, depth, alpha
 
 def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, save_video):
     first_iter = 0
@@ -159,7 +291,14 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
     #controlnet
     use_control_net = False
     #set up pretrain diffusion models and text_embedings 
-    guidance, embeddings = guidance_setup(guidance_opt)   
+    guidance, embeddings, obj_embeddings, edge_embeddings = guidance_setup(guidance_opt)   
+    num_objs = opt.num_objs
+    idx_list = [i for i in range(num_objs)]
+    if len(opt.edge_list) == num_objs:
+        edge_list = opt.edge_list
+    else:
+        print('size of edge list must be same as number of objects')
+        exit()  
     viewpoint_stack = None
     viewpoint_stack_around = None
     ema_loss_for_log = 0.0
@@ -201,130 +340,34 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
         if iteration % 500 == 0:
             gaussians.oneupSHdegree()
 
-        # progressively relaxing view range    
-        if not opt.use_progressive:                
-            if iteration >= opt.progressive_view_iter and iteration % opt.scale_up_cameras_iter == 0:
-                scene.pose_args.fovy_range[0] = max(scene.pose_args.max_fovy_range[0], scene.pose_args.fovy_range[0] * opt.fovy_scale_up_factor[0])
-                scene.pose_args.fovy_range[1] = min(scene.pose_args.max_fovy_range[1], scene.pose_args.fovy_range[1] * opt.fovy_scale_up_factor[1])
+        curr_obj_idx = iteration % (num_objs + 1)
+        if curr_obj_idx < num_objs:
+            idx = idx_list[curr_obj_idx - 1]
+            if curr_obj_idx == num_objs - 1:
+                random.shuffle(idx_list)
 
-                scene.pose_args.radius_range[1] = max(scene.pose_args.max_radius_range[1], scene.pose_args.radius_range[1] * opt.scale_up_factor)
-                scene.pose_args.radius_range[0] = max(scene.pose_args.max_radius_range[0], scene.pose_args.radius_range[0] * opt.scale_up_factor)
-
-                scene.pose_args.theta_range[1] = min(scene.pose_args.max_theta_range[1], scene.pose_args.theta_range[1] * opt.phi_scale_up_factor)
-                scene.pose_args.theta_range[0] = max(scene.pose_args.max_theta_range[0], scene.pose_args.theta_range[0] * 1/opt.phi_scale_up_factor)
-
-                # opt.reset_resnet_iter = max(500, opt.reset_resnet_iter // 1.25)
-                scene.pose_args.phi_range[0] = max(scene.pose_args.max_phi_range[0] , scene.pose_args.phi_range[0] * opt.phi_scale_up_factor)
-                scene.pose_args.phi_range[1] = min(scene.pose_args.max_phi_range[1], scene.pose_args.phi_range[1] * opt.phi_scale_up_factor)
-                
-                print('scale up theta_range to:', scene.pose_args.theta_range)
-                print('scale up radius_range to:', scene.pose_args.radius_range)
-                print('scale up phi_range to:', scene.pose_args.phi_range)
-                print('scale up fovy_range to:', scene.pose_args.fovy_range)
-
-        # Pick a random Camera
-        if not viewpoint_stack:
-            viewpoint_stack = scene.getRandTrainCameras().copy()         
-        
-        C_batch_size = guidance_opt.C_batch_size
-        viewpoint_cams = []
-        images = []
-        text_z_ = []
-        weights_ = []
-        depths = []
-        alphas = []
-        scales = []
-
-        text_z_inverse =torch.cat([embeddings['uncond'],embeddings['inverse_text']], dim=0)
-
-        for i in range(C_batch_size):
-            try:
-                viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))            
-            except:
-                viewpoint_stack = scene.getRandTrainCameras().copy()
-                viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-                
-            #pred text_z
-            azimuth = viewpoint_cam.delta_azimuth
-            text_z = [embeddings['uncond']]
-
-
-            if guidance_opt.perpneg:
-                text_z_comp, weights = adjust_text_embeddings(embeddings, azimuth, guidance_opt)
-                text_z.append(text_z_comp)
-                weights_.append(weights)
-
-            else:                
-                if azimuth >= -90 and azimuth < 90:
-                    if azimuth >= 0:
-                        r = 1 - azimuth / 90
-                    else:
-                        r = 1 + azimuth / 90
-                    start_z = embeddings['front']
-                    end_z = embeddings['side']
-                else:
-                    if azimuth >= 0:
-                        r = 1 - (azimuth - 90) / 90
-                    else:
-                        r = 1 + (azimuth + 90) / 90
-                    start_z = embeddings['side']
-                    end_z = embeddings['back']
-                text_z.append(r * start_z + (1 - r) * end_z)
-
-            text_z = torch.cat(text_z, dim=0)
-            text_z_.append(text_z)
-
-            # Render
-            if (iteration - 1) == debug_from:
-                pipe.debug = True
-            render_pkg = render(viewpoint_cam, gaussians, pipe, background, 
-                                sh_deg_aug_ratio = dataset.sh_deg_aug_ratio, 
-                                bg_aug_ratio = dataset.bg_aug_ratio, 
-                                shs_aug_ratio = dataset.shs_aug_ratio, 
-                                scale_aug_ratio = dataset.scale_aug_ratio)
-            image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-            depth, alpha = render_pkg["depth"], render_pkg["alpha"]
-
-            scales.append(render_pkg["scales"])
-            images.append(image)
-            depths.append(depth)
-            alphas.append(alpha)
-            viewpoint_cams.append(viewpoint_cams)
-
-        images = torch.stack(images, dim=0)
-        depths = torch.stack(depths, dim=0)
-        alphas = torch.stack(alphas, dim=0)
-
-        # Loss
-        warm_up_rate = 1. - min(iteration/opt.warmup_iter,1.)
-        guidance_scale = guidance_opt.guidance_scale
-        _aslatent = False
-        if iteration < opt.geo_iter or random.random()< opt.as_latent_ratio:
-            _aslatent=True
-        if iteration > opt.use_control_net_iter and (random.random() < guidance_opt.controlnet_ratio):
-                use_control_net = True
-        if guidance_opt.perpneg:
-            loss = guidance.train_step_perpneg(torch.stack(text_z_, dim=1), images, 
-                                                pred_depth=depths, pred_alpha=alphas,
-                                                grad_scale=guidance_opt.lambda_guidance,
-                                                use_control_net = use_control_net ,save_folder = save_folder,  iteration = iteration, warm_up_rate=warm_up_rate, 
-                                                weights = torch.stack(weights_, dim=1), resolution=(gcams.image_h, gcams.image_w),
-                                                guidance_opt=guidance_opt,as_latent=_aslatent, embedding_inverse = text_z_inverse)
+        if iteration % (num_objs + 1) != 0:
+            full_scene = False
+            edge_loss, image, viewspace_point_tensor, visibility_filter, radii, depth, alpha = forward(opt, embeddings=edge_embeddings[idx], objs=edge_list[idx], iteration=iteration, 
+                viewpoint_stack=viewpoint_stack, scene=scene, guidance_opt=guidance_opt, debug_from=debug_from, gaussians=gaussians, 
+                pipe=pipe, background=background, dataset=dataset, guidance=guidance, use_control_net=use_control_net, save_folder=save_folder, gcams=gcams)
+            obj_loss, _, viewspace_point_tensor_obj, visibility_filter_obj, radii_obj, depth_obj, alpha_obj = forward(opt, embeddings=obj_embeddings[idx], objs=[idx], iteration=iteration, 
+                viewpoint_stack=viewpoint_stack, scene=scene, guidance_opt=guidance_opt, debug_from=debug_from, gaussians=gaussians, 
+                pipe=pipe, background=background, dataset=dataset, guidance=guidance, use_control_net=use_control_net, save_folder=save_folder, gcams=gcams)
+            loss = obj_loss + edge_loss
+            selected_objs = [edge_list[idx], [idx]]
+            vpt = [viewspace_point_tensor, viewspace_point_tensor_obj]
+            vf = [visibility_filter, visibility_filter_obj]
+            radiis = [radii, radii_obj]
         else:
-            loss = guidance.train_step(torch.stack(text_z_, dim=1), images, 
-                                    pred_depth=depths, pred_alpha=alphas,
-                                    grad_scale=guidance_opt.lambda_guidance,
-                                    use_control_net = use_control_net ,save_folder = save_folder,  iteration = iteration, warm_up_rate=warm_up_rate, 
-                                    resolution=(gcams.image_h, gcams.image_w),
-                                    guidance_opt=guidance_opt,as_latent=_aslatent, embedding_inverse = text_z_inverse)
-            #raise ValueError(f'original version not supported.')
-        scales = torch.stack(scales, dim=0)
+            full_scene = True
+            # full scene rendering
+            loss, image, viewspace_point_tensor, visibility_filter, radii, depth, alpha = forward(opt, embeddings=embeddings, objs=idx_list, iteration=iteration, 
+                viewpoint_stack=viewpoint_stack, scene=scene, guidance_opt=guidance_opt, debug_from=debug_from, gaussians=gaussians, 
+                pipe=pipe, background=background, dataset=dataset, guidance=guidance, use_control_net=use_control_net, save_folder=save_folder, gcams=gcams)
+            
+            selected_objs = idx_list
 
-        loss_scale = torch.mean(scales,dim=-1).mean()
-        loss_tv = tv_loss(images) + tv_loss(depths) 
-        # loss_bin = torch.mean(torch.min(alphas - 0.0001, 1 - alphas))
-
-        loss = loss + opt.lambda_tv * loss_tv + opt.lambda_scale * loss_scale #opt.lambda_tv * loss_tv + opt.lambda_bin * loss_bin + opt.lambda_scale * loss_scale +
         loss.backward()
         iter_end.record()
 
@@ -334,7 +377,7 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
             if opt.save_process:
                 if iteration % save_process_iter == 0 and len(process_view_points) > 0:
                     viewpoint_cam_p = process_view_points.pop(0)
-                    render_p = render(viewpoint_cam_p, gaussians, pipe, background, test=True)
+                    render_p = render(viewpoint_cam_p, gaussians, pipe, background, idx_list, test=True)
                     img_p = torch.clamp(render_p["render"], 0.0, 1.0) 
                     img_p = img_p.detach().cpu().permute(1,2,0).numpy()
                     img_p = (img_p * 255).round().astype('uint8')
@@ -347,10 +390,10 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background, idx_list))
             if (iteration in testing_iterations):
                 if save_video:
-                    video_inference(iteration, scene, render, (pipe, background))
+                    video_inference(iteration, scene, render, (pipe, background, idx_list))
 
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
@@ -359,20 +402,38 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                if full_scene:
+                    for j, i in enumerate(selected_objs):
+                        gaussians.max_radii2D[i, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]] = torch.max(gaussians.max_radii2D[i, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]], radii[j, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]])
+                    gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, selected_objs)
+                else:
+                    for k in range(2):
+                        visibility_filter = vf[k]
+                        viewspace_point_tensor = vpt[k]
+                        radii = radiis[k]
+                        for j, i in enumerate(selected_objs[k]):
+                            gaussians.max_radii2D[i, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]] = torch.max(gaussians.max_radii2D[i, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]], radii[j, :gaussians.points_per_obj[i]][visibility_filter[j][:gaussians.points_per_obj[i]]])
+                        gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, selected_objs[k])
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                 
+                # print('---before-----')
+                # for i in range(opt.num_objs):
+                #     print(gaussians.get_xyz[i].isnan().sum())
                 if iteration % opt.opacity_reset_interval == 0: #or (dataset._white_background and iteration == opt.densify_from_iter)
                     gaussians.reset_opacity()
-
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+            
+            # print('---after-----')
+            if iteration % opt.opacity_reset_interval == 0:
+                for i in range(opt.num_objs):
+                    print(gaussians.get_xyz[i].isnan().sum())
+                    print(gaussians.opacity[i].isnan().sum())
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -487,7 +548,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_ratio", type=int, default=5) # [2500,5000,7500,10000,12000]
+    parser.add_argument("--test_ratio", type=int, default=20) # [2500,5000,7500,10000,12000]
     parser.add_argument("--save_ratio", type=int, default=2) # [10000,12000]
     parser.add_argument("--save_video", type=bool, default=False)
     parser.add_argument("--quiet", action="store_true")

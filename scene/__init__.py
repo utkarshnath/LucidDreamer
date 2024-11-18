@@ -65,7 +65,7 @@ class Scene:
         elif self.pretrained_model_path is not None:
             self.gaussians.load_ply(self.pretrained_model_path)
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            self.gaussians.create_from_pcd(scene_info.point_cloud, scene_info.points_per_obj, self.cameras_extent, scene_info.num_objs)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
