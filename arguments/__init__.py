@@ -71,7 +71,7 @@ class GuidanceParams(ParamGroup):
         self.side_decay_factor = 10.   
         
         self.vram_O = False
-        self.fp16 = True
+        self.fp16 = False
         self.hf_key = None
         self.t_range = [0.02, 0.5]     
         self.max_t_range = 0.98
@@ -180,9 +180,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_scale = 1.0
         self.lambda_sat = 1.0
         self.lambda_radius = 1.0
-        self.densification_interval = 25
-        self.opacity_reset_interval = 60
-        self.densify_from_iter = 25
+        self.densification_interval = 100
+        self.opacity_reset_interval = 300
+        self.densify_from_iter = 100
         self.densify_until_iter = 30_00 
         
         self.use_control_net_iter = 10000000 
@@ -192,7 +192,7 @@ class OptimizationParams(ParamGroup):
         self.save_process = True
         self.pro_frames_num = 600
         self.pro_render_45 = False
-        self.progressive_view_iter = 500
+        self.progressive_view_iter = 100
         self.progressive_view_init_ratio = 0.2
 
         self.scale_up_cameras_iter = 500

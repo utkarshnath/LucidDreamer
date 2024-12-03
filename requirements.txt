@@ -13,7 +13,7 @@ imageio-ffmpeg
 PyYAML
 safetensors
 wandb
-accelerate
+accelerate==0.31.0
 triton
 gradio
 plyfile==0.8.1

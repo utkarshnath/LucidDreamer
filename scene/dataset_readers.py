@@ -171,7 +171,7 @@ def readCircleCamInfo(path,opt):
                 ], axis=-1) # [B, 3]expend_dims
                 obj_rgb_ball = np.random.random((4096, num_pts, 3))*0.0001
                 obj_rgb = (np.expand_dims(obj_rgb, axis=1) + obj_rgb_ball).reshape(-1,3)
-                obj_xyz = (np.expand_dims(obj_xyz, axis=1) + np.expand_dims(obj_xyz_ball, axis=0)).reshape(-1, 3)
+                obj_xyz = (np.expand_dims(obj_xyz, axis=1) * opt.radius_params[i] + np.expand_dims(obj_xyz_ball, axis=0)).reshape(-1, 3)
                 obj_xyz = obj_xyz * 1. + opt.center_params[i]
                 num_pts = obj_xyz.shape[0]
                 xyz.append(obj_xyz)

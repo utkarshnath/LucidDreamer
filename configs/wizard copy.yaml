@@ -20,8 +20,8 @@ GuidanceParams:
     'a Stack of Ancient Spell Books next to a Crystal Ball, cartoon, blender', 'a Stack of Ancient Spell Books perched atop a Wooden Desk, cartoon, blender']
   negative: 'ugly, bad anatomy, blurry, pixelated obscure, unnatural colors, poor lighting, dull, and unclear, cropped, lowres, low quality, artifacts, duplicate, morbid, mutilated, poorly drawn face, deformed, dehydrated, bad proportions'
   edge_list: [[0,1],[1,2],[2,3],[1,3]]
-  center_params: [[-0.25,0.1,0.],[0.24,0.12,0.],[0.25,0.13,0.2],[0.28,-0.16,0.2]]
-  radius_params: [0.5,0.5,0.3,0.3]
+  center_params: [[-0.25, 0.1, 0.], [0.24, 0.1, 0.], [0.25, 0.13, 0.25], [0.28, 0, 0.2]]
+  radius_params: [0.6,0.35,0.2,0.15]
   num_objs: 4
   inverse_text: ''
   perpneg: true
@@ -44,12 +44,12 @@ GuidanceParams:
 
 GenerateCamParams:
   init_shape: 'pointe'
-  init_prompt: ['a human.', 'a table.', 'a ball.', 'a book stack.']
+  init_prompt: ['a human.', 'a table.', 'a ball.', 'books.']
   use_pointe_rgb: false
   init_num_pts: 100_000
   num_objs: 4
-  center_params: [[-0.25,0.1,0.],[0.24,0.12,0.],[0.25,0.13,0.2],[0.28,-0.16,0.2]]
-  radius_params: [0.5,0.5,0.3,0.3]
+  center_params: [[-0.25, 0.1, 0.], [0.24, 0.1, 0.], [0.25, 0.13, 0.2], [0.28, 0, 0.2]]
+  radius_params: [0.6,0.35,0.2,0.15]
   phi_range: [-80, 80]
   max_phi_range: [-180, 180]
   rand_cam_gamma: 1.5
@@ -76,12 +76,12 @@ OptimizationParams:
 
   as_latent_ratio : 0.2
   geo_iter : 0
-  densify_from_iter: 25
+  densify_from_iter: 100
   densify_until_iter: 3000
   percent_dense: 0.003
   densify_grad_threshold: 0.00075
   progressive_view_iter: 500 #1500
-  opacity_reset_interval: 60 #500
+  opacity_reset_interval: 300 #500
 
   scale_up_cameras_iter: 500
   fovy_scale_up_factor: [0.75, 1.1]

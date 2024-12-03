@@ -5,27 +5,25 @@ seed: 0
 PipelineParams:
   convert_SHs_python: False #true = using direct rgb
 ModelParams:
-  workspace: wizard
+  workspace: blue_jay
   sh_degree: 0
   bg_aug_ratio: 0.66
-  _source_path: /scratch/rgoel15/lucid/wizard_3/
-  _model_path: /scratch/rgoel15/lucid/wizard_3/
+  _source_path: /scratch/rgoel15/lucid/blue_jay/
+  _model_path: /scratch/rgoel15/lucid/blue_jay/
 
 GuidanceParams:
   model_key: 'stabilityai/stable-diffusion-2-1-base'
-  text: 'a Wizard standing before a Wooden Desk, gazing into a Crystal Ball perched atop the Wooden Desk, with a Stack of Ancient Spell Books perched atop the Wooden Desk, cartoon, blender, photorealistic, 8K, HDR.'
-  prompt_obj: ['a Wizard: bearded, standing, focused', 'a Wooden Desk: large, sturdy, carved with runes, aged', 
-    'a Crystal Ball with ornate stand: small, glowing, transparent, mystic',  'a Stack of Ancient Spell Books: small, leather-bound, weathered, rune-etched']
-  prompt_edge: ['a Wizard standing before a Wooden Desk, cartoon, blender', 'a Crystal Ball perched atop a Wooden Desk, cartoon, blender',
-    'a Stack of Ancient Spell Books next to a Crystal Ball, cartoon, blender', 'a Stack of Ancient Spell Books perched atop a Wooden Desk, cartoon, blender']
+  text: 'a DSLR photo of a blue jay standing on a large basket of rainbow macarons'
+  prompt_obj: ['a DSLR photo of a blue jay', 'a DSLR photo of a large basket of rainbow macarons']
+  prompt_edge: ['a DSLR photo of a blue jay standing on a large basket of rainbow macarons', 'a DSLR photo of a blue jay standing on a large basket of rainbow macarons']
   negative: 'ugly, bad anatomy, blurry, pixelated obscure, unnatural colors, poor lighting, dull, and unclear, cropped, lowres, low quality, artifacts, duplicate, morbid, mutilated, poorly drawn face, deformed, dehydrated, bad proportions'
-  edge_list: [[0,1],[1,2],[2,3],[1,3]]
-  center_params: [[-0.25, 0.1, 0.], [0.24, 0.1, 0.], [0.24, 0, 0.28], [0.24, 0.15, 0.28]]
-  radius_params: [0.6,0.3,0.12,0.12]
-  num_objs: 4
+  edge_list: [[0,1], [0,1]]
+  center_params: [[0.1, 0.4, 0.1], [0.0, 0.1, 0.0]]
+  radius_params: [0.5, 0.6]
+  num_objs: 2
   inverse_text: ''
   perpneg: true
-  C_batch_size: 4
+  C_batch_size: 1
   max_t_range: 0.98
   lambda_guidance: 0.1
   guidance_scale: 7.5
@@ -44,12 +42,12 @@ GuidanceParams:
 
 GenerateCamParams:
   init_shape: 'pointe'
-  init_prompt: ['a human.', 'a table.', 'a ball.', 'books.']
+  init_prompt: ['a bird.', 'a basket.']
   use_pointe_rgb: false
   init_num_pts: 100_000
-  num_objs: 4
-  center_params: [[-0.25, 0.1, 0.], [0.24, 0.1, 0.], [0.24, 0, 0.28], [0.24, 0.15, 0.28]]
-  radius_params: [0.6,0.3,0.12,0.12]
+  num_objs: 2
+  center_params: [[0.1, 0.4, 0.1], [0.0, 0.1, 0.0]]
+  radius_params: [0.5, 0.6]
   phi_range: [-80, 80]
   max_phi_range: [-180, 180]
   rand_cam_gamma: 1.5
@@ -71,8 +69,8 @@ OptimizationParams:
   pro_frames_num: 600
   pro_render_45: False
   warmup_iter: 1500 # 2500
-  num_objs: 4
-  edge_list: [[0,1],[1,2],[2,3],[1,3]]
+  num_objs: 2
+  edge_list: [[0,1], [0,1]]
 
   as_latent_ratio : 0.2
   geo_iter : 0
