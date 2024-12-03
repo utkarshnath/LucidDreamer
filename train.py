@@ -514,6 +514,22 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
                     pipe=pipe, background=background, dataset=dataset, guidance=guidance, use_control_net=use_control_net, save_folder=save_folder, gcams=gcams)
                 
                 selected_objs = idx_list
+        elif case == 5:
+            full_scene = False
+            curr_obj_idx = iteration % num_objs
+            idx = idx_list[curr_obj_idx]
+            if curr_obj_idx == num_objs - 1:
+                random.shuffle(idx_list)
+
+            obj_loss, _, viewspace_point_tensor_obj, visibility_filter_obj, radii_obj, depth_obj, alpha_obj = forward(opt, embeddings=obj_embeddings[idx], objs=[idx], iteration=iteration, 
+                viewpoint_stack=viewpoint_stack, scene=scene, guidance_opt=guidance_opt, debug_from=debug_from, gaussians=gaussians, 
+                pipe=pipe, background=background, dataset=dataset, guidance=guidance, use_control_net=use_control_net, save_folder=save_folder, gcams=gcams)
+            wandb.log({"loss/obj_loss": obj_loss.item()})
+            loss = obj_loss
+            selected_objs = [[idx]]
+            vpt = [viewspace_point_tensor_obj]
+            vf = [visibility_filter_obj]
+            radiis = [radii_obj]
 
         wandb.log({"loss/graph_loss": loss.item()})
         loss.backward()
@@ -545,9 +561,9 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
                     for i in range(num_objs):
                         video_inference_obj(iteration, scene, render_obj, (pipe, background, i), i, tb_writer)
 
-            if (iteration in saving_iterations):
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
+            # if (iteration in saving_iterations):
+            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+            #     scene.save(iteration)
 
             # Densification
             if iteration < opt.densify_until_iter:
