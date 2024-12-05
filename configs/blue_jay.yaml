@@ -8,8 +8,8 @@ ModelParams:
   workspace: blue_jay
   sh_degree: 0
   bg_aug_ratio: 0.66
-  _source_path: /scratch/rgoel15/lucid/blue_jay/
-  _model_path: /scratch/rgoel15/lucid/blue_jay/
+  _source_path: /scratch/rgoel15/lucid/blue_jay_2/
+  _model_path: /scratch/rgoel15/lucid/blue_jay_2/
 
 GuidanceParams:
   model_key: 'stabilityai/stable-diffusion-2-1-base'

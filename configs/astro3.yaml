@@ -8,18 +8,19 @@ ModelParams:
   workspace: astronaut
   sh_degree: 0
   bg_aug_ratio: 0.66
-  _source_path: /scratch/rgoel15/lucid/astro3/
-  _model_path: /scratch/rgoel15/lucid/astro3/
+  _source_path: /scratch/rgoel15/lucid/astro4_41/
+  _model_path: /scratch/rgoel15/lucid/astro4_41/
 
 GuidanceParams:
   model_key: 'stabilityai/stable-diffusion-2-1-base'
   text: 'an astronaut playing the violin'
   prompt_obj: ['a DSLR photo of an astronaut', 'a DSLR photo of a violin']
-  prompt_edge: ['an astronaut playing the violin', 'an astronaut playing the violin']
+  prompt_obj_neg: ['a DSLR photo of a violin', 'a DSLR photo of an astronaut']
+  prompt_edge: {'[0, 1]': 'an astronaut playing the violin'}
   negative: 'ugly, bad anatomy, blurry, pixelated obscure, unnatural colors, poor lighting, dull, and unclear, cropped, lowres, low quality, artifacts, duplicate, morbid, mutilated, poorly drawn face, deformed, dehydrated, bad proportions'
-  edge_list: [[0,1], [0,1]]
-  center_params: [[0.0, 0.5, 0.0], [0.01, 0.65, 0.1]]
-  radius_params: [0.5, 0.2]
+  edge_dict: {0: [[0, 1]]}
+  center_params: [[0.0, 0.0, 0.0], [0.01, 0.3, 0.1]]
+  radius_params: [0.5, 0.1]
   num_objs: 2
   inverse_text: ''
   perpneg: true
@@ -44,10 +45,10 @@ GenerateCamParams:
   init_shape: 'pointe'
   init_prompt: ['a human.', 'a violin.']
   use_pointe_rgb: false
-  init_num_pts: 100_000
+  init_num_pts: 200_000
   num_objs: 2
-  center_params: [[0.0, 0.5, 0.0], [0.01, 0.65, 0.1]]
-  radius_params: [0.5, 0.2]
+  center_params: [[0.0, 0.0, 0.0], [0.01, 0.3, 0.1]]
+  radius_params: [0.5, 0.1]
   phi_range: [-80, 80]
   max_phi_range: [-180, 180]
   rand_cam_gamma: 1.5
@@ -64,23 +65,23 @@ GenerateCamParams:
   max_fovy_range: [0.16, 0.60]
 
 OptimizationParams:
-  iterations: 5000
+  iterations: 10000
   save_process: True
   pro_frames_num: 600
   pro_render_45: False
-  warmup_iter: 1500 # 2500
+  warmup_iter: 3000 # 25003
   num_objs: 2
-  edge_list: [[0,1], [0,1]]
+  edge_dict: {0: [[0, 1]]}
 
   as_latent_ratio : 0.2
   geo_iter : 0
-  densify_from_iter: 100
-  densify_until_iter: 3000
+  densify_from_iter: 200
+  densify_until_iter: 6000
   percent_dense: 0.003
   densify_grad_threshold: 0.00075
-  progressive_view_iter: 500 #1500
-  opacity_reset_interval: 300 #500
+  progressive_view_iter: 1000 #1500
+  opacity_reset_interval: 600 #500
 
-  scale_up_cameras_iter: 500
+  scale_up_cameras_iter: 1000
   fovy_scale_up_factor: [0.75, 1.1]
   phi_scale_up_factor: 1.5
