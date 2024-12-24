@@ -481,9 +481,9 @@ def training(dataset, opt, pipe, gcams, guidance_opt, testing_iterations, saving
 					for i in range(num_objs):
 						video_inference_obj(iteration, scene, render_obj, (pipe, background, i), i, tb_writer)
 
-			# if (iteration in saving_iterations):
-			#     print("\n[ITER {}] Saving Gaussians".format(iteration))
-			#     scene.save(iteration)
+			if (iteration in saving_iterations):
+			    print("\n[ITER {}] Saving Gaussians".format(iteration))
+			    scene.save(iteration)
 
 			# Densification
 			if iteration < opt.densify_until_iter:
@@ -664,7 +664,7 @@ if __name__ == "__main__":
 	parser.add_argument('--seed', type=int, default=0)
 	parser.add_argument('--detect_anomaly', action='store_true', default=False)
 	parser.add_argument("--test_ratio", type=int, default=20) # [2500,5000,7500,10000,12000]
-	parser.add_argument("--save_ratio", type=int, default=1) # [10000,12000]
+	parser.add_argument("--save_ratio", type=int, default=1000) # [10000,12000]
 	parser.add_argument("--save_video", type=bool, default=False)
 	parser.add_argument("--quiet", action="store_true")
 	parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])

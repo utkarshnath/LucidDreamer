@@ -183,6 +183,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     try:
         min_d = disp[alpha <= 0.1].min()
     except:
+        print(depth)
+        print(disp)
         min_d = disp.min()
 
     disp = torch.clamp((disp - min_d) / (disp.max() - min_d), 0.0, 1.0)

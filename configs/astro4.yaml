@@ -8,8 +8,8 @@ ModelParams:
   workspace: astronaut
   sh_degree: 0
   bg_aug_ratio: 0.66
-  _source_path: /scratch/rgoel15/lucid/astro4_42/
-  _model_path: /scratch/rgoel15/lucid/astro4_42/
+  _source_path: /scratch/rgoel15/lucid/astro2_sphere/
+  _model_path: /scratch/rgoel15/lucid/astro2_sphere/
 
 GuidanceParams:
   model_key: 'stabilityai/stable-diffusion-2-1-base'
@@ -19,12 +19,12 @@ GuidanceParams:
   prompt_edge: {'[0, 1]': 'an astronaut playing the violin'}
   negative: 'ugly, bad anatomy, blurry, pixelated obscure, unnatural colors, poor lighting, dull, and unclear, cropped, lowres, low quality, artifacts, duplicate, morbid, mutilated, poorly drawn face, deformed, dehydrated, bad proportions'
   edge_dict: {0: [[0, 1]]}
-  center_params: [[0.0, 0.0, 0.0], [0.01, 0.3, 0.1]]
-  radius_params: [0.5, 0.1]
+  center_params: [[0.0, 0.0, 0.0], [-0.18, 0.1, 0.25]]
+  radius_params: [0.6, 0.1]
   num_objs: 2
   inverse_text: ''
   perpneg: true
-  C_batch_size: 1
+  C_batch_size: 4
   max_t_range: 0.98
   lambda_guidance: 0.1
   guidance_scale: 7.5
@@ -43,12 +43,12 @@ GuidanceParams:
 
 GenerateCamParams:
   init_shape: 'pointe'
-  init_prompt: ['a human.', 'a violin.']
+  init_prompt: ['a human.', 'a sphere.']
   use_pointe_rgb: false
   init_num_pts: 200_000
   num_objs: 2
-  center_params: [[0.0, 0.0, 0.0], [0.01, 0.3, 0.1]]
-  radius_params: [0.5, 0.1]
+  center_params: [[0.0, 0.0, 0.0], [-0.18, 0.1, 0.25]]
+  radius_params: [0.6, 0.1]
   phi_range: [-80, 80]
   max_phi_range: [-180, 180]
   rand_cam_gamma: 1.5
@@ -76,6 +76,7 @@ OptimizationParams:
   as_latent_ratio : 0.2
   geo_iter : 0
   densify_from_iter: 200
+  densification_interval: 200
   densify_until_iter: 6000
   percent_dense: 0.003
   densify_grad_threshold: 0.00075

@@ -110,6 +110,36 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
+def rotate_point_cloud(point_cloud, angles):
+    angle_x, angle_y, angle_z = angles
+
+    # Rotation matrix around the X-axis
+    rotation_x = np.array([
+        [1, 0, 0],
+        [0, np.cos(angle_x), -np.sin(angle_x)],
+        [0, np.sin(angle_x), np.cos(angle_x)]
+    ])
+
+    # Rotation matrix around the Y-axis
+    rotation_y = np.array([
+        [np.cos(angle_y), 0, np.sin(angle_y)],
+        [0, 1, 0],
+        [-np.sin(angle_y), 0, np.cos(angle_y)]
+    ])
+
+    # Rotation matrix around the Z-axis
+    rotation_z = np.array([
+        [np.cos(angle_z), -np.sin(angle_z), 0],
+        [np.sin(angle_z), np.cos(angle_z), 0],
+        [0, 0, 1]
+    ])
+
+    # Combined rotation matrix
+    rotation_matrix = rotation_z @ rotation_y @ rotation_x  # Order of multiplication: Z -> Y -> X
+
+    # Apply the rotation matrix to the point cloud
+    return np.dot(point_cloud, rotation_matrix.T)
+
 #only test_camera
 def readCircleCamInfo(path,opt):
     print("Reading Test Transforms")
@@ -171,6 +201,8 @@ def readCircleCamInfo(path,opt):
                 ], axis=-1) # [B, 3]expend_dims
                 obj_rgb_ball = np.random.random((4096, num_pts, 3))*0.0001
                 obj_rgb = (np.expand_dims(obj_rgb, axis=1) + obj_rgb_ball).reshape(-1,3)
+                if 'violin' in opt.init_prompt[i]:
+                    obj_xyz = rotate_point_cloud(obj_xyz, (opt.rotate_angles[0], opt.rotate_angles[1], opt.rotate_angles[2]))
                 obj_xyz = (np.expand_dims(obj_xyz, axis=1) * opt.radius_params[i] + np.expand_dims(obj_xyz_ball, axis=0)).reshape(-1, 3)
                 obj_xyz = obj_xyz * 1. + opt.center_params[i]
                 num_pts = obj_xyz.shape[0]

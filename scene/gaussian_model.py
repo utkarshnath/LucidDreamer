@@ -235,20 +235,19 @@ class GaussianModel:
 	def construct_list_of_attributes(self):
 		l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
 		# All channels except the 3 DC
-		for i in range(self._features_dc.shape[1]*self._features_dc.shape[2]):
+		for i in range(self._features_dc.shape[2]*self._features_dc.shape[3]):
 			l.append('f_dc_{}'.format(i))
-		for i in range(self._features_rest.shape[1]*self._features_rest.shape[2]):
+		for i in range(self._features_rest.shape[2]*self._features_rest.shape[3]):
 			l.append('f_rest_{}'.format(i))
 		l.append('opacity')
-		for i in range(self._scaling.shape[1]):
+		for i in range(self._scaling.shape[-1]):
 			l.append('scale_{}'.format(i))
-		for i in range(self._rotation.shape[1]):
+		for i in range(self._rotation.shape[-1]):
 			l.append('rot_{}'.format(i))
 		return l
 
 	def save_ply(self, path):
 		mkdir_p(os.path.dirname(path))
-
 		xyz = self._xyz.reshape(-1, self._xyz.shape[2]).detach().cpu().numpy()
 		normals = np.zeros_like(xyz)
 		f_dc = self._features_dc.reshape(-1, self._features_dc.shape[2], self._features_dc.shape[3]).detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
@@ -267,11 +266,11 @@ class GaussianModel:
 			attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
 		except:
 			attributes = np.concatenate((xyz, normals, f_dc, opacities, scale, rotation), axis=1)
-			
 		elements[:] = list(map(tuple, attributes))
 		el = PlyElement.describe(elements, 'vertex')
 		PlyData([el]).write(path)
-		np.savetxt(os.path.join(os.path.split(path)[0],"point_cloud_rgb.txt"),np.concatenate((xyz, SH2RGB(f_dc)), axis=1))
+		np.savetxt(os.path.join(os.path.split(path)[0],"point_cloud_rgb.txt"), np.concatenate((xyz, SH2RGB(f_dc)), axis=1))
+		np.savetxt(os.path.join(os.path.split(path)[0], "points_per_obj.txt"), np.array(self.points_per_obj))
 
 	def reset_opacity(self):
 		opacities_new = []
@@ -317,7 +316,7 @@ class GaussianModel:
 		for idx, attr_name in enumerate(rot_names):
 			rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
-		self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
+		self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").view(self.num_objs, xyz.shape[0] // 4, xyz.shape[1:]).requires_grad_(True))
 		self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
 		self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
 		self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
